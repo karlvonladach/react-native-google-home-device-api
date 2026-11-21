@@ -29,8 +29,39 @@ android {
   defaultConfig {
     minSdkVersion getExtOrDefault("minSdkVersion")
   }
+
+  kotlinOptions {
+    freeCompilerArgs += ["-Xskip-metadata-version-check"]
+  }
+}
+
+repositories {
+  mavenLocal()
+  google()
+  mavenCentral()
+}
+
+configurations.all {
+  resolutionStrategy {
+    force(
+      "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0",
+      "org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.11.0",
+      "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0",
+      "org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0",
+      "org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.11.0"
+    )
+  }
 }
 
 dependencies {
   implementation "com.facebook.react:react-android"
+
+  // play-services-home:17.1.0 requires kotlinx-coroutines 1.11.0
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0"
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0"
+
+  // Google Home Device APIs
+  implementation "com.google.android.gms:play-services-home:17.1.0"
+  implementation "com.google.android.gms:play-services-home-types:17.1.0"
 }

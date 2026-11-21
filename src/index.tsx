@@ -1,1 +1,4 @@
-export { multiply } from './multiply';
+import GoogleHomeDeviceApi from './NativeGoogleHomeDeviceApi';
+
+export * from './NativeGoogleHomeDeviceApi';
+export default GoogleHomeDeviceApi;
