@@ -146,5 +146,12 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
       client.registerActivityResultCallerForPermissions(activity)
       isCallerRegistered = true
     }
+
+    @JvmStatic
+    fun onActivityDestroy(activity: ComponentActivity) {
+      if (isCallerRegistered) {
+        isCallerRegistered = false
+      }
+    }
   }
 }
