@@ -69,58 +69,8 @@ subprojects {
 
 > **Note:** Google Home Device APIs require a **physical Android device** with Google Play Services and the Google Home app installed.
 
-```tsx
-import React, { useState } from 'react';
-import { Alert, Button, FlatList, Text, View } from 'react-native';
-import GoogleHomeDeviceApi, {
-  type HomeDevice,
-} from 'react-native-google-home-device-api';
-
-export default function App() {
-  const [devices, setDevices] = useState<HomeDevice[]>([]);
-  const [status, setStatus] = useState('Disconnected');
-
-  const connectAndLoad = async () => {
-    try {
-      await GoogleHomeDeviceApi.initialize();
-      const granted = await GoogleHomeDeviceApi.requestPermissions();
-
-      if (!granted) {
-        setStatus('Permission denied');
-        return;
-      }
-
-      setStatus('Connected');
-      const list = await GoogleHomeDeviceApi.getDevices();
-      setDevices(list);
-    } catch (err: any) {
-      setStatus(`Error: ${err?.message ?? err}`);
-      Alert.alert('Google Home Error', String(err?.message ?? err));
-    }
-  };
-
-  return (
-    <View style={{ flex: 1, padding: 24, paddingTop: 60 }}>
-      <Text style={{ marginBottom: 12 }}>Status: {status}</Text>
-      <Button title="Connect Google Home" onPress={connectAndLoad} />
-
-      <FlatList
-        data={devices}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <View style={{ marginVertical: 10 }}>
-            <Text>{item.name}</Text>
-            <Button
-              title="Turn On"
-              onPress={() => GoogleHomeDeviceApi.setOnOff(item.id, true)}
-            />
-          </View>
-        )}
-      />
-    </View>
-  );
-}
-```
+See the [example app](example/src/App.tsx) for on-demand connection, device
+listing, connectivity-aware controls, and refreshing device state.
 
 ## API Reference
 
