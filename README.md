@@ -80,12 +80,36 @@ listing, connectivity-aware controls, and refreshing device state.
 | `requestPermissions()` | `Promise<boolean>` | Launches the Google Home structure & device permissions consent sheet. Resolves `true` if granted. |
 | `getDevices()` | `Promise<HomeDevice[]>` | Lists all accessible devices across the user's Google Home structures. |
 | `setOnOff(deviceId, on)` | `Promise<void>` | Sends an `OnOff` trait command (`true` = on, `false` = off) to the specified device. |
+| `subscribeToOnOffChanges(onChange, onError)` | `{ remove(): void }` | Monitors reported on/off state; call `remove()` to unsubscribe. |
 
 On Android, `getDevices()` includes `connectivity` (`ONLINE`, `PARTIALLY_ONLINE`,
 `OFFLINE`, or `UNKNOWN`), `isControllable` (whether the supported On/Off trait
 is reachable), and `isOn` when the trait reports its state. These are snapshots;
 call `getDevices()` again to refresh them. A partially online device is online,
 but its On/Off trait may still be unavailable.
+
+After initialization and permission approval, subscribe to live on/off state:
+
+```tsx
+import { subscribeToOnOffChanges } from 'react-native-google-home-device-api';
+
+const subscription = subscribeToOnOffChanges(
+  ({ deviceId, isOn }) => console.log(deviceId, isOn),
+  ({ message }) => console.error('Device monitoring failed:', message)
+);
+
+// When the listener is no longer needed:
+subscription.remove();
+```
+
+The Android subscription observes the supported On/Off light and plug-in unit
+types. It emits their current reported state when monitoring starts and when
+devices are re-observed, as well as subsequent changes; duplicate values are
+possible. It does not report connectivity changes or act as a background
+service. Keep the subscription while updates are needed, and refresh the device
+list for connectivity or membership changes. If monitoring fails, the error
+callback is invoked; remove and resubscribe to retry. Multiple subscribers
+share one native monitor, which stops when the last subscription is removed.
 
 ## License
 

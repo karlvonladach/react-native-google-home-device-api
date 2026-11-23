@@ -8,13 +8,17 @@ import com.google.home.matter.standard.OnOff
 import com.google.home.matter.standard.OnOffLightDevice
 import com.google.home.matter.standard.OnOffPluginUnitDevice
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 @ReactModule(name = GoogleHomeDeviceApiModule.NAME)
 class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
   NativeGoogleHomeDeviceApiSpec(reactContext) {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  private var monitoringJob: Job? = null
 
   override fun getName(): String = NAME
 
@@ -118,6 +122,60 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
     val types = device.types().first()
     return types.filterIsInstance<OnOffLightDevice>().firstOrNull()?.trait(OnOff)
       ?: types.filterIsInstance<OnOffPluginUnitDevice>().firstOrNull()?.trait(OnOff)
+  }
+
+  override fun startOnOffMonitoring() {
+    val client = homeClient
+    if (client == null) {
+      emitOnMonitoringError(Arguments.createMap().apply {
+        putString("message", "Call initialize() first")
+      })
+      return
+    }
+    if (monitoringJob?.isActive == true) return
+    monitoringJob = scope.launch {
+      try {
+        client.devices().collectLatest { devices ->
+          coroutineScope {
+            devices.forEach { device ->
+              when {
+                device.has(OnOffLightDevice) -> launch {
+                  device.type(OnOffLightDevice)
+                    .map { it.trait(OnOff)?.onOff }
+                    .distinctUntilChanged()
+                    .collect { state -> emitOnOffState(device.id.id, state) }
+                }
+                device.has(OnOffPluginUnitDevice) -> launch {
+                  device.type(OnOffPluginUnitDevice)
+                    .map { it.trait(OnOff)?.onOff }
+                    .distinctUntilChanged()
+                    .collect { state -> emitOnOffState(device.id.id, state) }
+                }
+              }
+            }
+          }
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        emitOnMonitoringError(Arguments.createMap().apply {
+          putString("message", e.message ?: e.toString())
+        })
+      }
+    }
+  }
+
+  private fun emitOnOffState(deviceId: String, state: Boolean?) {
+    if (state == null) return
+    emitOnOnOffChange(Arguments.createMap().apply {
+      putString("deviceId", deviceId)
+      putBoolean("isOn", state)
+    })
+  }
+
+  override fun stopOnOffMonitoring() {
+    monitoringJob?.cancel()
+    monitoringJob = null
   }
 
   override fun invalidate() {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import GoogleHomeDeviceApi, {
+  subscribeToOnOffChanges,
   type HomeDevice,
 } from 'react-native-google-home-device-api';
 
@@ -31,10 +32,59 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const [monitorVersion, setMonitorVersion] = useState(0);
+  const eventVersions = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!connected) return undefined;
+    let active = true;
+    try {
+      const subscription = subscribeToOnOffChanges(
+        ({ deviceId, isOn }) => {
+          if (!active) return;
+          eventVersions.current[deviceId] =
+            (eventVersions.current[deviceId] ?? 0) + 1;
+          setDevices((current) =>
+            current.map((device) =>
+              device.id === deviceId ? { ...device, isOn } : device
+            )
+          );
+        },
+        (error) => {
+          if (!active) return;
+          setStatus('Live updates unavailable');
+          Alert.alert(
+            'Google Home Error',
+            `${error.message}\nRefresh devices to retry.`
+          );
+        }
+      );
+      return () => {
+        active = false;
+        subscription.remove();
+      };
+    } catch (error: unknown) {
+      setStatus('Live updates unavailable');
+      Alert.alert(
+        'Google Home Error',
+        `${errorMessage(error)}\nRefresh devices to retry.`
+      );
+      return undefined;
+    }
+  }, [connected, monitorVersion]);
 
   const loadDevices = async () => {
+    const versions = { ...eventVersions.current };
     const list = await GoogleHomeDeviceApi.getDevices();
-    setDevices(list);
+    setDevices((current) =>
+      list.map((device) => {
+        const previous = current.find((item) => item.id === device.id);
+        return previous &&
+          eventVersions.current[device.id] !== versions[device.id]
+          ? { ...device, isOn: previous.isOn }
+          : device;
+      })
+    );
   };
 
   const connect = async () => {
@@ -63,6 +113,7 @@ export default function App() {
     try {
       await loadDevices();
       setStatus('Connected');
+      setMonitorVersion((version) => version + 1);
     } catch (error: unknown) {
       setStatus('Refresh failed');
       Alert.alert('Google Home Error', errorMessage(error));
@@ -76,12 +127,16 @@ export default function App() {
       return;
     }
     const nextState = !device.isOn;
+    const eventVersion = eventVersions.current[device.id];
     setPendingIds((current) => [...current, device.id]);
     try {
       await GoogleHomeDeviceApi.setOnOff(device.id, nextState);
       setDevices((current) =>
         current.map((item) =>
-          item.id === device.id ? { ...item, isOn: nextState } : item
+          item.id === device.id &&
+          eventVersions.current[device.id] === eventVersion
+            ? { ...item, isOn: nextState }
+            : item
         )
       );
     } catch (error: unknown) {
