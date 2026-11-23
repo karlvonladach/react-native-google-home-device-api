@@ -7,6 +7,9 @@ import {
 export interface HomeDevice {
   id: string;
   name: string;
+  deviceType?: string;
+  deviceTypeName?: string;
+  deviceTypes?: string[];
   roomName?: string;
   isOn?: boolean;
   connectivity?: string;

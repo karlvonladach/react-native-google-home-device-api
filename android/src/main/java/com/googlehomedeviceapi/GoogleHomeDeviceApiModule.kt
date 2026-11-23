@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import com.facebook.react.bridge.*
 import com.facebook.react.module.annotations.ReactModule
 import com.google.home.*
+import com.google.home.annotation.HomeExperimentalGenericApi
 import com.google.home.matter.standard.OnOff
 import com.google.home.matter.standard.OnOffLightDevice
 import com.google.home.matter.standard.OnOffPluginUnitDevice
@@ -65,6 +66,7 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  @OptIn(HomeExperimentalGenericApi::class)
   override fun getDevices(promise: Promise) {
     val client = homeClient ?: return promise.reject("NOT_INIT", "Call initialize() first")
     scope.launch {
@@ -75,11 +77,22 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
           val devices = structure.devices().first()
           for (device in devices) {
             val onOffTrait = findOnOffTrait(device)
+            val types = device.genericTypes().first()
+            val typeIds = types.map { it.factory.factory.typeId.id }.distinct().sorted()
+            val primaryType = types.firstOrNull { it.metadata.isPrimaryType }
+              ?.factory?.factory?.typeId?.id
             val connectivity = device.sourceConnectivity.connectivityState
             val traitConnectivity = onOffTrait?.metadata?.sourceConnectivity?.connectivityState
             val map = Arguments.createMap().apply {
               putString("id", device.id.id)
               putString("name", device.name)
+              primaryType?.let { putString("deviceType", it) }
+              primaryType?.let { deviceTypeNames[it] }?.let { putString("deviceTypeName", it) }
+              if (typeIds.size > 1) {
+                putArray("deviceTypes", Arguments.createArray().apply {
+                  typeIds.forEach { pushString(it) }
+                })
+              }
               putString("connectivity", connectivity.name)
               putBoolean(
                 "isControllable",

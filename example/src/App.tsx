@@ -197,6 +197,11 @@ export default function App() {
               >
                 <View style={styles.deviceInfo}>
                   <Text style={styles.deviceName}>{item.name}</Text>
+                  {(item.deviceTypeName || item.deviceType) && (
+                    <Text style={styles.deviceDetail}>
+                      {item.deviceTypeName || item.deviceType}
+                    </Text>
+                  )}
                   {detail && <Text style={styles.deviceDetail}>{detail}</Text>}
                 </View>
                 <Pressable

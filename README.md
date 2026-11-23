@@ -88,6 +88,25 @@ is reachable), and `isOn` when the trait reports its state. These are snapshots;
 call `getDevices()` again to refresh them. A partially online device is online,
 but its On/Off trait may still be unavailable.
 
+When available, `deviceType` is the primary device type's SDK identifier.
+For built-in Android SDK 17.1.0 types, `deviceTypeName` is an English,
+human-readable name for that primary type (for example, `On/Off Light`).
+It is absent for unrecognized types or when no primary type is reported;
+applications can display `deviceType` as a fallback. Names are not localized.
+If the SDK reports multiple distinct types, `deviceTypes` contains their
+identifiers, including the primary type when reported. Either property may be
+absent if the SDK does not provide the corresponding information. These are
+identifiers, not localized display names. Type discovery uses Google's
+experimental generic API and may change with SDK updates.
+
+When updating the Android SDK, regenerate the type name mapping using the JDK
+`jar` and `javap` tools. Extract `classes.jar` from each SDK AAR into separate
+files, then run:
+
+```bash
+node scripts/generate-device-type-names.cjs <types-classes.jar> <home-classes.jar>
+```
+
 After initialization and permission approval, subscribe to live on/off state:
 
 ```tsx
