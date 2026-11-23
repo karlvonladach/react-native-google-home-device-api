@@ -70,9 +70,19 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
         for (structure in structures) {
           val devices = structure.devices().first()
           for (device in devices) {
+            val onOffTrait = findOnOffTrait(device)
+            val connectivity = device.sourceConnectivity.connectivityState
+            val traitConnectivity = onOffTrait?.metadata?.sourceConnectivity?.connectivityState
             val map = Arguments.createMap().apply {
               putString("id", device.id.id)
               putString("name", device.name)
+              putString("connectivity", connectivity.name)
+              putBoolean(
+                "isControllable",
+                (connectivity == ConnectivityState.ONLINE || connectivity == ConnectivityState.PARTIALLY_ONLINE) &&
+                  (traitConnectivity == ConnectivityState.ONLINE || traitConnectivity == ConnectivityState.PARTIALLY_ONLINE)
+              )
+              onOffTrait?.onOff?.let { putBoolean("isOn", it) }
             }
             result.pushMap(map)
           }
@@ -89,8 +99,7 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
     scope.launch {
       try {
         val device = client.devices().first().first { it.id.id == deviceId }
-        val onOffTrait = device.type(OnOffLightDevice).trait(OnOff).first()
-          ?: device.type(OnOffPluginUnitDevice).trait(OnOff).first()
+        val onOffTrait = findOnOffTrait(device)
 
         if (onOffTrait == null) {
           promise.reject("NO_TRAIT", "Device does not support OnOff trait")
@@ -103,6 +112,12 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
         promise.reject("CMD_ERROR", e.message, e)
       }
     }
+  }
+
+  private suspend fun findOnOffTrait(device: HomeDevice): OnOff? {
+    val types = device.types().first()
+    return types.filterIsInstance<OnOffLightDevice>().firstOrNull()?.trait(OnOff)
+      ?: types.filterIsInstance<OnOffPluginUnitDevice>().firstOrNull()?.trait(OnOff)
   }
 
   override fun invalidate() {

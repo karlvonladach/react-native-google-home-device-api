@@ -5,6 +5,8 @@ export interface HomeDevice {
   name: string;
   roomName?: string;
   isOn?: boolean;
+  connectivity?: string;
+  isControllable?: boolean;
 }
 
 export interface Spec extends TurboModule {

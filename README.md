@@ -131,6 +131,12 @@ export default function App() {
 | `getDevices()` | `Promise<HomeDevice[]>` | Lists all accessible devices across the user's Google Home structures. |
 | `setOnOff(deviceId, on)` | `Promise<void>` | Sends an `OnOff` trait command (`true` = on, `false` = off) to the specified device. |
 
+On Android, `getDevices()` includes `connectivity` (`ONLINE`, `PARTIALLY_ONLINE`,
+`OFFLINE`, or `UNKNOWN`), `isControllable` (whether the supported On/Off trait
+is reachable), and `isOn` when the trait reports its state. These are snapshots;
+call `getDevices()` again to refresh them. A partially online device is online,
+but its On/Off trait may still be unavailable.
+
 ## License
 
 MIT
