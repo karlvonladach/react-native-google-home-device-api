@@ -1,16 +1,9 @@
 import GoogleHomeDeviceApi from './NativeGoogleHomeDeviceApi';
-import type {
-  HomeDevice,
-  MonitoringError,
-  OnOffChange,
-} from './NativeGoogleHomeDeviceApi';
-import { TraitIds } from './TraitIds';
+import type { HomeDevice, MonitoringError } from './NativeGoogleHomeDeviceApi';
 
 export { TraitIds } from './TraitIds';
 export type { TraitId } from './TraitIds';
 
-let listenerCount = 0;
-let monitoring = false;
 let nextEventSubscriptionId = 0;
 let nextAttributeSubscriptionId = 0;
 
@@ -32,8 +25,6 @@ export type DeviceEvent = {
   eventNumber: string;
   payload: unknown;
 };
-
-export const ON_OFF_TRAIT_ID = TraitIds.OnOffTrait;
 
 export function deviceHasTrait(device: HomeDevice, traitId: string): boolean {
   return device.traitIds.includes(traitId);
@@ -286,77 +277,6 @@ export function getDevice(deviceId: string, selector: DeviceTypeSelector = {}) {
       onEvent: (event: DeviceEvent) => void,
       onError: (error: MonitoringError) => void
     ) => subscribeToDeviceEvents(deviceId, onEvent, onError, selector),
-    traits: {
-      onOff: {
-        on: async () => {
-          await command(ON_OFF_TRAIT_ID, 'on');
-        },
-        off: async () => {
-          await command(ON_OFF_TRAIT_ID, 'off');
-        },
-        toggle: async () => {
-          await command(ON_OFF_TRAIT_ID, 'toggle');
-        },
-        async getOnOff(): Promise<boolean | null> {
-          const value = await read(ON_OFF_TRAIT_ID, 'onOff');
-          if (value !== null && typeof value !== 'boolean') {
-            throw new Error('Invalid OnOff attribute value');
-          }
-          return value;
-        },
-        setOnTime: (value: number) => write(ON_OFF_TRAIT_ID, 'onTime', value),
-        setOffWaitTime: (value: number) =>
-          write(ON_OFF_TRAIT_ID, 'offWaitTime', value),
-        setStartUpOnOff: (value: 'Off' | 'On' | 'Toggle' | null) =>
-          write(ON_OFF_TRAIT_ID, 'startUpOnOff', value),
-      },
-    },
-  };
-}
-
-export function subscribeToOnOffChanges(
-  onChange: (event: OnOffChange) => void,
-  onError: (error: MonitoringError) => void
-): { remove(): void } {
-  const changeSubscription = GoogleHomeDeviceApi.onOnOffChange(onChange);
-  let errorSubscription: ReturnType<
-    typeof GoogleHomeDeviceApi.onMonitoringError
-  >;
-  try {
-    errorSubscription = GoogleHomeDeviceApi.onMonitoringError((error) => {
-      monitoring = false;
-      onError(error);
-    });
-  } catch (error) {
-    changeSubscription.remove();
-    throw error;
-  }
-  try {
-    if (!monitoring) {
-      monitoring = true;
-      GoogleHomeDeviceApi.startOnOffMonitoring();
-    }
-    listenerCount++;
-  } catch (error) {
-    monitoring = false;
-    changeSubscription.remove();
-    errorSubscription.remove();
-    throw error;
-  }
-
-  let removed = false;
-  return {
-    remove() {
-      if (removed) return;
-      removed = true;
-      changeSubscription.remove();
-      errorSubscription.remove();
-      listenerCount--;
-      if (listenerCount === 0) {
-        monitoring = false;
-        GoogleHomeDeviceApi.stopOnOffMonitoring();
-      }
-    },
   };
 }
 

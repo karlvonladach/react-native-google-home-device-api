@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -15,42 +15,51 @@ import GoogleHomeDeviceApi, {
   type HomeDevice,
 } from 'react-native-google-home-device-api';
 
+type OnOffDevice = HomeDevice & { isOn?: boolean };
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function canAccessOnOff(device: HomeDevice): boolean {
+function canAccessOnOff(device: OnOffDevice): boolean {
   return (
-    (device.connectivity === 'ONLINE' ||
-      device.connectivity === 'PARTIALLY_ONLINE') &&
-    deviceHasTrait(device, TraitIds.OnOffTrait)
+    device.connectivity === 'ONLINE' ||
+    device.connectivity === 'PARTIALLY_ONLINE'
   );
 }
 
-function canControl(device: HomeDevice): boolean {
+function canControl(device: OnOffDevice): boolean {
   return canAccessOnOff(device) && device.isOn !== undefined;
 }
 
 export default function App() {
   const [devices, setDevices] = useState<HomeDevice[]>([]);
+  const [onOffDevices, setOnOffDevices] = useState<OnOffDevice[]>([]);
   const [status, setStatus] = useState('Not connected');
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
-  const [monitorVersion, setMonitorVersion] = useState(0);
-  const [monitorIds, setMonitorIds] = useState<string[]>([]);
   const eventVersions = useRef<Record<string, number>>({});
+  const devicesToMonitor = useRef<OnOffDevice[]>([]);
+  const stopSubscriptions = useRef<(() => void) | undefined>(undefined);
+  const monitoringActive = useRef(false);
 
-  useEffect(() => {
-    if (!connected) return undefined;
+  const updateSubscriptions = useCallback((list: OnOffDevice[]) => {
+    stopSubscriptions.current?.();
     let active = true;
     const subscriptions: { remove(): void }[] = [];
+    stopSubscriptions.current = () => {
+      active = false;
+      subscriptions.forEach((subscription) => subscription.remove());
+    };
     const reportError = (message: string) => {
       if (!active) return;
       setStatus('Live updates unavailable');
       Alert.alert('Google Home Error', `${message}\nRefresh devices to retry.`);
     };
-    monitorIds.forEach((deviceId) => {
+    list.forEach((device) => {
+      if (!canAccessOnOff(device)) return;
+      const deviceId = device.id;
       getDevice(deviceId)
         .subscribeToAttribute(
           TraitIds.OnOffTrait,
@@ -63,11 +72,11 @@ export default function App() {
             }
             eventVersions.current[deviceId] =
               (eventVersions.current[deviceId] ?? 0) + 1;
-            setDevices((current) =>
-              current.map((device) =>
-                device.id === deviceId
-                  ? { ...device, isOn: value === null ? undefined : value }
-                  : device
+            setOnOffDevices((current) =>
+              current.map((item) =>
+                item.id === deviceId
+                  ? { ...item, isOn: value === null ? undefined : value }
+                  : item
               )
             );
           },
@@ -79,18 +88,28 @@ export default function App() {
         })
         .catch((error: unknown) => reportError(errorMessage(error)));
     });
+  }, []);
+
+  useEffect(() => {
+    if (!connected) return undefined;
+    monitoringActive.current = true;
+    updateSubscriptions(devicesToMonitor.current);
     return () => {
-      active = false;
-      subscriptions.forEach((subscription) => subscription.remove());
+      monitoringActive.current = false;
+      stopSubscriptions.current?.();
+      stopSubscriptions.current = undefined;
     };
-  }, [connected, monitorVersion, monitorIds]);
+  }, [connected, updateSubscriptions]);
 
   const loadDevices = async () => {
     const versions = { ...eventVersions.current };
     const list = await GoogleHomeDeviceApi.getDevices();
     const readErrors: string[] = [];
+    const onOffList: OnOffDevice[] = list.filter((device) =>
+      deviceHasTrait(device, TraitIds.OnOffTrait)
+    );
     const devicesWithState = await Promise.all(
-      list.map(async (device) => {
+      onOffList.map(async (device) => {
         if (!canAccessOnOff(device)) return device;
         try {
           const value = await getDevice(device.id).readAttribute(
@@ -107,27 +126,21 @@ export default function App() {
         }
       })
     );
-    setDevices((current) =>
-      devicesWithState.map((device) => {
-        const previous = current.find((item) => item.id === device.id);
-        return previous &&
-          eventVersions.current[device.id] !== versions[device.id]
-          ? { ...device, isOn: previous.isOn }
-          : device;
+    setDevices(list);
+    setOnOffDevices((current) =>
+      devicesWithState.map((item) => {
+        const id = item.id;
+        const previous = current.find((device) => device.id === id);
+        return previous && eventVersions.current[id] !== versions[id]
+          ? { ...item, isOn: previous.isOn }
+          : item;
       })
     );
-    const ids = list
-      .filter(canAccessOnOff)
-      .map((device) => device.id)
-      .sort();
-    setMonitorIds((current) =>
-      current.length === ids.length && current.every((id, i) => id === ids[i])
-        ? current
-        : ids
-    );
+    devicesToMonitor.current = devicesWithState;
     if (readErrors.length > 0) {
       Alert.alert('Could not read device state', readErrors.join('\n'));
     }
+    return devicesWithState;
   };
 
   const connect = async () => {
@@ -154,9 +167,9 @@ export default function App() {
   const refresh = async () => {
     setLoading(true);
     try {
-      await loadDevices();
+      const list = await loadDevices();
       setStatus('Connected');
-      setMonitorVersion((version) => version + 1);
+      if (monitoringActive.current) updateSubscriptions(list);
     } catch (error: unknown) {
       setStatus('Refresh failed');
       Alert.alert('Google Home Error', errorMessage(error));
@@ -165,7 +178,7 @@ export default function App() {
     }
   };
 
-  const toggle = async (device: HomeDevice) => {
+  const toggle = async (device: OnOffDevice) => {
     if (!canControl(device) || loading || pendingIds.includes(device.id)) {
       return;
     }
@@ -177,7 +190,7 @@ export default function App() {
         TraitIds.OnOffTrait,
         nextState ? 'on' : 'off'
       );
-      setDevices((current) =>
+      setOnOffDevices((current) =>
         current.map((item) =>
           item.id === device.id &&
           eventVersions.current[device.id] === eventVersion
@@ -216,6 +229,7 @@ export default function App() {
       {connected && (
         <FlatList
           data={devices}
+          extraData={onOffDevices}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           ListEmptyComponent={
@@ -223,7 +237,11 @@ export default function App() {
           }
           renderItem={({ item }) => {
             const offline = item.connectivity === 'OFFLINE';
-            const available = canControl(item);
+            const onOffDevice = onOffDevices.find(
+              (device) => device.id === item.id
+            );
+            const available =
+              onOffDevice !== undefined && canControl(onOffDevice);
             const disabled =
               !available || loading || pendingIds.includes(item.id);
             const detail = offline
@@ -231,9 +249,9 @@ export default function App() {
               : item.connectivity !== 'ONLINE' &&
                   item.connectivity !== 'PARTIALLY_ONLINE'
                 ? 'Connectivity unknown'
-                : !deviceHasTrait(item, TraitIds.OnOffTrait)
+                : !onOffDevice
                   ? 'Control unavailable'
-                  : item.isOn === undefined
+                  : onOffDevice.isOn === undefined
                     ? 'State unavailable'
                     : null;
 
@@ -252,14 +270,16 @@ export default function App() {
                 </View>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`${item.isOn ? 'Turn off' : 'Turn on'} ${item.name}`}
+                  accessibilityLabel={`${onOffDevice?.isOn ? 'Turn off' : 'Turn on'} ${item.name}`}
                   accessibilityState={{ disabled }}
                   disabled={disabled}
-                  onPress={() => toggle(item)}
+                  onPress={() => {
+                    if (onOffDevice) toggle(onOffDevice);
+                  }}
                   style={[styles.toggle, disabled && styles.disabled]}
                 >
                   <Text style={styles.toggleText}>
-                    {item.isOn ? 'Off' : 'On'}
+                    {onOffDevice?.isOn ? 'Off' : 'On'}
                   </Text>
                 </Pressable>
               </View>

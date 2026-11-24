@@ -80,8 +80,6 @@ listing, connectivity-aware controls, and refreshing device state.
 | `requestPermissions()` | `Promise<boolean>` | Launches the Google Home structure & device permissions consent sheet. Resolves `true` if granted. |
 | `getDevices()` | `Promise<HomeDevice[]>` | Lists all accessible devices across the user's Google Home structures. |
 | `deviceHasTrait(device, traitId)` | `boolean` | Checks whether a listed device reports a trait identifier. |
-| `setOnOff(deviceId, on)` | `Promise<void>` | Sends an `OnOff` trait command (`true` = on, `false` = off) to the specified device. |
-| `subscribeToOnOffChanges(onChange, onError)` | `{ remove(): void }` | Monitors reported on/off state; call `remove()` to unsubscribe. |
 | `getDevice(deviceId, selector?)` | device wrapper | Creates a wrapper for commands, attribute reads/writes, and event subscriptions. |
 | `readTraitAttribute(deviceId, traitId, name, selector?)` | `Promise<unknown>` | Reads a reported trait attribute by its full trait ID and name. |
 | `subscribeToTraitAttribute(deviceId, traitId, name, onChange, onError, selector?)` | `Promise<{ remove(): void }>` | Observes a reported attribute on one device type. |
@@ -103,9 +101,6 @@ if (deviceHasTrait(device, TraitIds.OnOffTrait)) {
   // The device reports an OnOff trait.
 }
 ```
-
-For compatibility, `isOn` is also included when an On/Off light or plug-in
-unit reports its state. Use generic attribute reads for other device types.
 
 When available, `deviceType` is the primary device type's SDK identifier.
 For built-in Android SDK 17.1.0 types, `deviceTypeName` is an English,
@@ -145,7 +140,6 @@ missing matches rather than selecting a type arbitrarily.
 `TraitIds.ChimeTrait`. Map values are full ID strings and can be passed directly
 to generic methods; raw ID strings still work for custom or future traits.
 The exported `TraitId` type is the union of the built-in ID values.
-`ON_OFF_TRAIT_ID` remains available for compatibility.
 
 Named commands use SDK command descriptors. Use the lower-camel command name
 (such as `moveToLevel`) or its SDK descriptor name (`MoveToLevelCommand`) and
@@ -169,7 +163,7 @@ Structs use objects keyed by SDK constructor parameter names. Supply every
 non-optional field (including explicit `null` for nullable fields); omit an SDK
 `OptionalValue` field to leave it absent. Invalid fields and unsupported bitmap
 bits reject instead of being silently dropped. The selected device must report
-the attribute as supported. Only OnOff currently has a typed facade.
+the attribute as supported.
 The example app uses the generic read and command APIs for OnOff devices; the
 `onOff` attribute itself is read-only. Devices with multiple matching types or
 parts require a selector, which the example app does not choose.
@@ -179,7 +173,7 @@ import { getDevice, TraitIds } from 'react-native-google-home-device-api';
 
 const device = getDevice(deviceId, { deviceTypeId, partId });
 await device.executeCommand(TraitIds.OnOffTrait, 'on');
-await device.traits.onOff.off();
+await device.executeCommand(TraitIds.OnOffTrait, 'off');
 // A parameterized command (the device must support the trait and command):
 await device.executeCommand(TraitIds.LevelControlTrait, 'moveToLevel', {
   level: 100,
@@ -188,7 +182,7 @@ await device.executeCommand(TraitIds.LevelControlTrait, 'moveToLevel', {
   optionsOverride: 0,
 });
 const state = await device.readAttribute(TraitIds.OnOffTrait, 'onOff');
-await device.traits.onOff.setOnTime(10);
+await device.writeAttribute(TraitIds.OnOffTrait, 'onTime', 10);
 await device.writeAttribute(
   TraitIds.ThermostatTrait,
   'occupiedHeatingSetpoint',
@@ -231,8 +225,7 @@ The Android subscription emits the current reported value and subsequent
 changes for the selected device and attribute. It does not report connectivity
 or membership changes or act as a background service. Refresh the device list
 and manage subscriptions as membership changes. If monitoring fails, the error
-callback is invoked; remove and resubscribe to retry. The legacy
-`subscribeToOnOffChanges` API remains available for On/Off lights and plugs.
+callback is invoked; remove and resubscribe to retry.
 
 ## License
 

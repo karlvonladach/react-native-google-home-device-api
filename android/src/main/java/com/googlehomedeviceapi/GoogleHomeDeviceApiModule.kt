@@ -6,12 +6,8 @@ import com.facebook.react.module.annotations.ReactModule
 import com.google.home.*
 import com.google.home.annotation.HomeExperimentalApi
 import com.google.home.annotation.HomeExperimentalGenericApi
-import com.google.home.matter.standard.OnOff
-import com.google.home.matter.standard.OnOffLightDevice
-import com.google.home.matter.standard.OnOffPluginUnitDevice
 import com.google.home.matter.serialization.ClusterBitmap
 import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -26,7 +22,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
   NativeGoogleHomeDeviceApiSpec(reactContext) {
 
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-  private var monitoringJob: Job? = null
   private val eventJobs = ConcurrentHashMap<String, Job>()
   private val attributeJobs = ConcurrentHashMap<String, Job>()
 
@@ -85,7 +80,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
         for (structure in structures) {
           val devices = structure.devices().first()
           for (device in devices) {
-            val onOffTrait = findOnOffTrait(device)
             val types = device.genericTypes().first()
             val typeIds = types.map { it.factory.factory.typeId.id }.distinct().sorted()
             val traitIds = types.flatMap { type ->
@@ -108,7 +102,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
                 traitIds.forEach { pushString(it) }
               })
               putString("connectivity", connectivity.name)
-              onOffTrait?.onOff?.let { putBoolean("isOn", it) }
             }
             result.pushMap(map)
           }
@@ -118,50 +111,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
         promise.reject("FETCH_ERROR", e.message, e)
       }
     }
-  }
-
-  override fun setOnOff(deviceId: String, turnOn: Boolean, promise: Promise) {
-    val client = homeClient ?: return promise.reject("NOT_INIT", "Call initialize() first")
-    scope.launch {
-      try {
-        val device = client.devices().first().first { it.id.id == deviceId }
-        val onOffTrait = findOnOffTrait(device)
-
-        if (onOffTrait == null) {
-          promise.reject("NO_TRAIT", "Device does not support OnOff trait")
-          return@launch
-        }
-
-        if (turnOn) onOffTrait.on() else onOffTrait.off()
-        promise.resolve(null)
-      } catch (e: Exception) {
-        promise.reject("CMD_ERROR", e.message, e)
-      }
-    }
-  }
-
-  private suspend fun findOnOffTrait(device: HomeDevice): OnOff? {
-    val types = device.types().first()
-    return types.filterIsInstance<OnOffLightDevice>().firstOrNull()?.trait(OnOff)
-      ?: types.filterIsInstance<OnOffPluginUnitDevice>().firstOrNull()?.trait(OnOff)
-  }
-
-  private suspend fun selectOnOffTrait(
-    device: HomeDevice,
-    deviceTypeId: String,
-    partId: String,
-    traitId: String
-  ): OnOff {
-    require(traitId == OnOff.factory.traitId) { "Unsupported trait: $traitId" }
-    val matches = device.types().first().filter {
-      (deviceTypeId.isEmpty() || it.factory.factory.typeId.id == deviceTypeId) &&
-        (partId.isEmpty() || it.metadata.partId == partId) &&
-        it.trait(OnOff) != null
-    }
-    require(matches.size == 1) {
-      if (matches.isEmpty()) "No matching OnOff trait" else "Device type is ambiguous; specify deviceTypeId and partId"
-    }
-    return requireNotNull(matches.single().trait(OnOff))
   }
 
   @OptIn(HomeExperimentalGenericApi::class)
@@ -181,26 +130,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
         val device = client.devices().first().firstOrNull { it.id.id == deviceId }
           ?: throw IllegalArgumentException("Device not found: $deviceId")
         val args = JSONObject(argumentsJson)
-        if (traitId == OnOff.factory.traitId &&
-          commandName in setOf("on", "off", "toggle") &&
-          args.length() == 0 && !useTimedCommand
-        ) {
-          val trait = selectOnOffTrait(device, deviceTypeId, partId, traitId)
-          val command = when (commandName) {
-            "on" -> OnOff.Command.On
-            "off" -> OnOff.Command.Off
-            else -> OnOff.Command.Toggle
-          }
-          require(trait.supports(command)) { "Command is not supported by this device: $commandName" }
-          when (command) {
-            OnOff.Command.On -> trait.on()
-            OnOff.Command.Off -> trait.off()
-            OnOff.Command.Toggle -> trait.toggle()
-            else -> throw IllegalStateException("Unsupported command: $commandName")
-          }
-          promise.resolve("null")
-          return@launch
-        }
         val candidates = device.genericTypes().first().filter { type ->
           type.genericTraits.any { it.factory.factory.traitId == traitId }
         }
@@ -551,60 +480,6 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
       }
     }
     else -> throw IllegalArgumentException("Unsupported payload value: ${value.javaClass.name}")
-  }
-
-  override fun startOnOffMonitoring() {
-    val client = homeClient
-    if (client == null) {
-      emitOnMonitoringError(Arguments.createMap().apply {
-        putString("message", "Call initialize() first")
-      })
-      return
-    }
-    if (monitoringJob?.isActive == true) return
-    monitoringJob = scope.launch {
-      try {
-        client.devices().collectLatest { devices ->
-          coroutineScope {
-            devices.forEach { device ->
-              when {
-                device.has(OnOffLightDevice) -> launch {
-                  device.type(OnOffLightDevice)
-                    .map { it.trait(OnOff)?.onOff }
-                    .distinctUntilChanged()
-                    .collect { state -> emitOnOffState(device.id.id, state) }
-                }
-                device.has(OnOffPluginUnitDevice) -> launch {
-                  device.type(OnOffPluginUnitDevice)
-                    .map { it.trait(OnOff)?.onOff }
-                    .distinctUntilChanged()
-                    .collect { state -> emitOnOffState(device.id.id, state) }
-                }
-              }
-            }
-          }
-        }
-      } catch (e: CancellationException) {
-        throw e
-      } catch (e: Exception) {
-        emitOnMonitoringError(Arguments.createMap().apply {
-          putString("message", e.message ?: e.toString())
-        })
-      }
-    }
-  }
-
-  private fun emitOnOffState(deviceId: String, state: Boolean?) {
-    if (state == null) return
-    emitOnOnOffChange(Arguments.createMap().apply {
-      putString("deviceId", deviceId)
-      putBoolean("isOn", state)
-    })
-  }
-
-  override fun stopOnOffMonitoring() {
-    monitoringJob?.cancel()
-    monitoringJob = null
   }
 
   override fun invalidate() {

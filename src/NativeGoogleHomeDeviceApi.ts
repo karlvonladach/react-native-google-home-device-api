@@ -12,14 +12,8 @@ export interface HomeDevice {
   deviceTypes?: string[];
   traitIds: string[];
   roomName?: string;
-  isOn?: boolean;
   connectivity?: string;
 }
-
-export type OnOffChange = {
-  deviceId: string;
-  isOn: boolean;
-};
 
 export type MonitoringError = {
   message: string;
@@ -50,7 +44,6 @@ export interface Spec extends TurboModule {
   initialize(): Promise<boolean>;
   requestPermissions(): Promise<boolean>;
   getDevices(): Promise<HomeDevice[]>;
-  setOnOff(deviceId: string, turnOn: boolean): Promise<void>;
   executeTraitCommand(
     deviceId: string,
     deviceTypeId: string,
@@ -91,10 +84,6 @@ export interface Spec extends TurboModule {
     attributeName: string
   ): Promise<void>;
   stopAttributeMonitoring(subscriptionId: string): void;
-  startOnOffMonitoring(): void;
-  stopOnOffMonitoring(): void;
-  readonly onOnOffChange: CodegenTypes.EventEmitter<OnOffChange>;
-  readonly onMonitoringError: CodegenTypes.EventEmitter<MonitoringError>;
   readonly onDeviceEvent: CodegenTypes.EventEmitter<NativeDeviceEvent>;
   readonly onDeviceEventError: CodegenTypes.EventEmitter<NativeDeviceEventError>;
   readonly onAttributeChange: CodegenTypes.EventEmitter<NativeAttributeChange>;

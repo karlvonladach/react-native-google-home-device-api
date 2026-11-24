@@ -4,11 +4,9 @@ import {
   deviceHasTrait,
   executeTraitCommand,
   getDevice,
-  ON_OFF_TRAIT_ID,
   readTraitAttribute,
   subscribeToDeviceEvents,
   subscribeToTraitAttribute,
-  subscribeToOnOffChanges,
   TraitIds,
   writeTraitAttribute,
 } from '../index';
@@ -16,10 +14,6 @@ import {
 jest.mock('../NativeGoogleHomeDeviceApi', () => ({
   __esModule: true,
   default: {
-    onOnOffChange: jest.fn(),
-    onMonitoringError: jest.fn(),
-    startOnOffMonitoring: jest.fn(),
-    stopOnOffMonitoring: jest.fn(),
     readTraitAttribute: jest.fn(),
     executeTraitCommand: jest.fn(),
     writeTraitAttribute: jest.fn(),
@@ -111,56 +105,6 @@ it('cleans up attribute listeners if subscription fails', async () => {
   expect(removeChange).toHaveBeenCalledTimes(1);
   expect(removeError).toHaveBeenCalledTimes(1);
 });
-it('shares monitoring between listeners and stops after the last removal', () => {
-  const removeChange = jest.fn();
-  const removeError = jest.fn();
-  native.onOnOffChange.mockReturnValue({ remove: removeChange });
-  native.onMonitoringError.mockReturnValue({ remove: removeError });
-  const onChange = jest.fn();
-  const onError = jest.fn();
-  const first = subscribeToOnOffChanges(onChange, onError);
-  const second = subscribeToOnOffChanges(jest.fn(), jest.fn());
-
-  expect(native.startOnOffMonitoring).toHaveBeenCalledTimes(1);
-  native.onOnOffChange.mock.calls[0]![0]({ deviceId: 'lamp', isOn: true });
-  expect(onChange).toHaveBeenCalledWith({ deviceId: 'lamp', isOn: true });
-  first.remove();
-  first.remove();
-  expect(native.stopOnOffMonitoring).not.toHaveBeenCalled();
-  second.remove();
-  expect(native.stopOnOffMonitoring).toHaveBeenCalledTimes(1);
-  expect(removeChange).toHaveBeenCalledTimes(2);
-  expect(removeError).toHaveBeenCalledTimes(2);
-});
-
-it('reports monitoring failures and allows a new listener to retry', () => {
-  native.onOnOffChange.mockReturnValue({ remove: jest.fn() });
-  native.onMonitoringError.mockReturnValue({ remove: jest.fn() });
-  const onError = jest.fn();
-  const first = subscribeToOnOffChanges(jest.fn(), onError);
-  native.onMonitoringError.mock.calls[0]![0]({ message: 'Disconnected' });
-  expect(onError).toHaveBeenCalledWith({ message: 'Disconnected' });
-  const second = subscribeToOnOffChanges(jest.fn(), jest.fn());
-  expect(native.startOnOffMonitoring).toHaveBeenCalledTimes(2);
-  first.remove();
-  second.remove();
-});
-
-it('cleans up listeners if monitoring cannot be started', () => {
-  const removeChange = jest.fn();
-  const removeError = jest.fn();
-  native.onOnOffChange.mockReturnValue({ remove: removeChange });
-  native.onMonitoringError.mockReturnValue({ remove: removeError });
-  native.startOnOffMonitoring.mockImplementationOnce(() => {
-    throw new Error('Failed to start');
-  });
-  expect(() => subscribeToOnOffChanges(jest.fn(), jest.fn())).toThrow(
-    'Failed to start'
-  );
-  expect(removeChange).toHaveBeenCalledTimes(1);
-  expect(removeError).toHaveBeenCalledTimes(1);
-});
-
 it('reads an attribute with an explicit type and preserves null', async () => {
   native.readTraitAttribute.mockResolvedValue('{"value":null}');
   await expect(
@@ -217,7 +161,6 @@ it('uses named Matter and Google traits with the generic APIs', async () => {
   );
   expect(TraitIds.ChimeTrait).toBe('home.matter.0000.clusters.0556');
   expect(TraitIds.GoogleChimeTrait).toBe('home.matter.6006.clusters.fc6a');
-  expect(ON_OFF_TRAIT_ID).toBe(TraitIds.OnOffTrait);
 });
 
 it('routes device events and errors to the matching subscription and removes it', async () => {
@@ -280,39 +223,6 @@ it('cleans up event listeners when native subscription fails', async () => {
   ).rejects.toThrow('Ambiguous device type');
   expect(removeEvent).toHaveBeenCalledTimes(1);
   expect(removeError).toHaveBeenCalledTimes(1);
-});
-
-it('routes typed OnOff calls through the named interface', async () => {
-  native.executeTraitCommand.mockResolvedValue('null');
-  native.writeTraitAttribute.mockResolvedValue();
-  native.readTraitAttribute.mockResolvedValue('{"value":true}');
-  const device = getDevice('lamp', {
-    deviceTypeId: 'type-id',
-    partId: 'part-id',
-  });
-  await device.traits.onOff.on();
-  expect(native.executeTraitCommand).toHaveBeenCalledWith(
-    'lamp',
-    'type-id',
-    'part-id',
-    ON_OFF_TRAIT_ID,
-    'on',
-    '{}',
-    false
-  );
-  await device.traits.onOff.setOnTime(42);
-  expect(native.writeTraitAttribute).toHaveBeenCalledWith(
-    'lamp',
-    'type-id',
-    'part-id',
-    ON_OFF_TRAIT_ID,
-    'onTime',
-    '{"value":42}'
-  );
-  await expect(device.traits.onOff.getOnOff()).resolves.toBe(true);
-  await expect(device.traits.onOff.setOnTime(NaN)).rejects.toThrow(
-    'invalid JSON value'
-  );
 });
 
 it('forwards command fields and timed option and returns the response', async () => {
