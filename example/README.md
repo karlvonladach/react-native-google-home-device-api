@@ -5,6 +5,8 @@ changes update automatically while connected. Offline and unavailable devices
 remain visible but cannot be controlled. Tap **Refresh devices** to update
 connectivity and membership or retry failed live updates. The Google Home integration
 requires a physical Android device; see the [library setup](../README.md).
+The app checks each device's reported trait IDs before reading or subscribing to
+its OnOff state; trait presence does not guarantee that it is reachable.
 
 # Getting Started
 

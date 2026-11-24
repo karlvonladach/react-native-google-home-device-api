@@ -9,7 +9,9 @@ import {
   View,
 } from 'react-native';
 import GoogleHomeDeviceApi, {
-  subscribeToOnOffChanges,
+  deviceHasTrait,
+  getDevice,
+  TraitIds,
   type HomeDevice,
 } from 'react-native-google-home-device-api';
 
@@ -17,13 +19,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function canControl(device: HomeDevice): boolean {
+function canAccessOnOff(device: HomeDevice): boolean {
   return (
     (device.connectivity === 'ONLINE' ||
       device.connectivity === 'PARTIALLY_ONLINE') &&
-    device.isControllable === true &&
-    device.isOn !== undefined
+    deviceHasTrait(device, TraitIds.OnOffTrait)
   );
+}
+
+function canControl(device: HomeDevice): boolean {
+  return canAccessOnOff(device) && device.isOn !== undefined;
 }
 
 export default function App() {
@@ -33,51 +38,77 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
   const [monitorVersion, setMonitorVersion] = useState(0);
+  const [monitorIds, setMonitorIds] = useState<string[]>([]);
   const eventVersions = useRef<Record<string, number>>({});
 
   useEffect(() => {
     if (!connected) return undefined;
     let active = true;
-    try {
-      const subscription = subscribeToOnOffChanges(
-        ({ deviceId, isOn }) => {
-          if (!active) return;
-          eventVersions.current[deviceId] =
-            (eventVersions.current[deviceId] ?? 0) + 1;
-          setDevices((current) =>
-            current.map((device) =>
-              device.id === deviceId ? { ...device, isOn } : device
-            )
-          );
-        },
-        (error) => {
-          if (!active) return;
-          setStatus('Live updates unavailable');
-          Alert.alert(
-            'Google Home Error',
-            `${error.message}\nRefresh devices to retry.`
-          );
-        }
-      );
-      return () => {
-        active = false;
-        subscription.remove();
-      };
-    } catch (error: unknown) {
+    const subscriptions: { remove(): void }[] = [];
+    const reportError = (message: string) => {
+      if (!active) return;
       setStatus('Live updates unavailable');
-      Alert.alert(
-        'Google Home Error',
-        `${errorMessage(error)}\nRefresh devices to retry.`
-      );
-      return undefined;
-    }
-  }, [connected, monitorVersion]);
+      Alert.alert('Google Home Error', `${message}\nRefresh devices to retry.`);
+    };
+    monitorIds.forEach((deviceId) => {
+      getDevice(deviceId)
+        .subscribeToAttribute(
+          TraitIds.OnOffTrait,
+          'onOff',
+          (value) => {
+            if (!active) return;
+            if (value !== null && typeof value !== 'boolean') {
+              reportError('Invalid OnOff attribute value');
+              return;
+            }
+            eventVersions.current[deviceId] =
+              (eventVersions.current[deviceId] ?? 0) + 1;
+            setDevices((current) =>
+              current.map((device) =>
+                device.id === deviceId
+                  ? { ...device, isOn: value === null ? undefined : value }
+                  : device
+              )
+            );
+          },
+          (error) => reportError(error.message)
+        )
+        .then((subscription) => {
+          if (active) subscriptions.push(subscription);
+          else subscription.remove();
+        })
+        .catch((error: unknown) => reportError(errorMessage(error)));
+    });
+    return () => {
+      active = false;
+      subscriptions.forEach((subscription) => subscription.remove());
+    };
+  }, [connected, monitorVersion, monitorIds]);
 
   const loadDevices = async () => {
     const versions = { ...eventVersions.current };
     const list = await GoogleHomeDeviceApi.getDevices();
+    const readErrors: string[] = [];
+    const devicesWithState = await Promise.all(
+      list.map(async (device) => {
+        if (!canAccessOnOff(device)) return device;
+        try {
+          const value = await getDevice(device.id).readAttribute(
+            TraitIds.OnOffTrait,
+            'onOff'
+          );
+          if (value !== null && typeof value !== 'boolean') {
+            throw new Error('Invalid OnOff attribute value');
+          }
+          return { ...device, isOn: value === null ? undefined : value };
+        } catch (error: unknown) {
+          readErrors.push(`${device.name}: ${errorMessage(error)}`);
+          return { ...device, isOn: undefined };
+        }
+      })
+    );
     setDevices((current) =>
-      list.map((device) => {
+      devicesWithState.map((device) => {
         const previous = current.find((item) => item.id === device.id);
         return previous &&
           eventVersions.current[device.id] !== versions[device.id]
@@ -85,6 +116,18 @@ export default function App() {
           : device;
       })
     );
+    const ids = list
+      .filter(canAccessOnOff)
+      .map((device) => device.id)
+      .sort();
+    setMonitorIds((current) =>
+      current.length === ids.length && current.every((id, i) => id === ids[i])
+        ? current
+        : ids
+    );
+    if (readErrors.length > 0) {
+      Alert.alert('Could not read device state', readErrors.join('\n'));
+    }
   };
 
   const connect = async () => {
@@ -130,7 +173,10 @@ export default function App() {
     const eventVersion = eventVersions.current[device.id];
     setPendingIds((current) => [...current, device.id]);
     try {
-      await GoogleHomeDeviceApi.setOnOff(device.id, nextState);
+      await getDevice(device.id).executeCommand(
+        TraitIds.OnOffTrait,
+        nextState ? 'on' : 'off'
+      );
       setDevices((current) =>
         current.map((item) =>
           item.id === device.id &&
@@ -185,7 +231,7 @@ export default function App() {
               : item.connectivity !== 'ONLINE' &&
                   item.connectivity !== 'PARTIALLY_ONLINE'
                 ? 'Connectivity unknown'
-                : !item.isControllable
+                : !deviceHasTrait(item, TraitIds.OnOffTrait)
                   ? 'Control unavailable'
                   : item.isOn === undefined
                     ? 'State unavailable'

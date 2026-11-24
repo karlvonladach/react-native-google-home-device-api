@@ -13,8 +13,8 @@ const entries = execFileSync('jar', ['tf', typesJar], {
   encoding: 'utf8',
   maxBuffer: 64 * 1024 * 1024,
 });
-const classes = entries
-  .split(/\r?\n/)
+const jarEntries = entries.split(/\r?\n/);
+const classes = jarEntries
   .filter((entry) =>
     /^com\/google\/home\/(?:matter\/standard|google)\/[^/$]+Device\.class$/.test(
       entry
@@ -81,4 +81,65 @@ fs.writeFileSync(
   `package com.googlehomedeviceapi\n\n` +
     `// Generated from the Google Home SDK; see scripts/generate-device-type-names.cjs.\n` +
     `internal val deviceTypeNames = mapOf(\n${lines.join('\n')}\n)\n`
+);
+
+const entrySet = new Set(jarEntries);
+const traits = jarEntries
+  .filter((entry) =>
+    /^com\/google\/home\/(?:matter\/standard|google)\/[^/$]+Trait\.class$/.test(
+      entry
+    )
+  )
+  .map((entry) => entry.replace(/Trait\.class$/, '.class'));
+for (const trait of traits) {
+  if (
+    !entrySet.has(trait) ||
+    !entrySet.has(trait.replace(/\.class$/, '$Companion.class'))
+  ) {
+    throw new Error(`Missing trait factory: ${trait}`);
+  }
+}
+if (traits.length === 0) throw new Error('No built-in trait factories found');
+const factoryPath = path.join(path.dirname(file), 'SdkFactories.kt');
+const namesFor = (values) =>
+  values
+    .map((value) => value.replace(/\.class$/, '').replace(/\//g, '.'))
+    .sort()
+    .map((value) => `    ${value},`)
+    .join('\n');
+const deviceClasses = classes.map(
+  (value) => value.replace(/\./g, '/') + '.class'
+);
+fs.writeFileSync(
+  factoryPath,
+  `package com.googlehomedeviceapi\n\n` +
+    `// Generated from the Google Home SDK; see scripts/generate-device-type-names.cjs.\n` +
+    `internal object SdkFactories {\n` +
+    `  val types = listOf(\n${namesFor(deviceClasses)}\n  )\n` +
+    `  val traits = listOf(\n${namesFor(traits)}\n  )\n}\n`
+);
+
+const commandClasses = jarEntries.filter((entry) =>
+  /^com\/google\/home\/(?:matter\/standard|google)\/[^/$]+Trait\$[^/$]+Command\.class$/.test(
+    entry
+  )
+);
+if (commandClasses.length === 0) {
+  throw new Error('No built-in command descriptors found');
+}
+const commands = commandClasses
+  .map((entry) => {
+    const [trait, command] = entry.replace(/\.class$/, '').split('$');
+    const factory = trait.replace(/Trait$/, '').replace(/\//g, '.');
+    if (!entrySet.has(trait.replace(/Trait$/, '.class'))) {
+      throw new Error(`Missing command trait factory: ${entry}`);
+    }
+    return `    ${factory}.factory.traitId to ${trait.replace(/\//g, '.')}.${command},`;
+  })
+  .sort();
+fs.writeFileSync(
+  path.join(path.dirname(file), 'SdkCommands.kt'),
+  `package com.googlehomedeviceapi\n\n` +
+    `// Generated from the Google Home SDK; see scripts/generate-device-type-names.cjs.\n` +
+    `internal val sdkCommands = listOf(\n${commands.join('\n')}\n)\n`
 );
