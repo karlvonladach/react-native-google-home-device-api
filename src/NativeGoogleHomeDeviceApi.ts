@@ -43,6 +43,7 @@ export type NativeAttributeChange = {
 export interface Spec extends TurboModule {
   initialize(): Promise<boolean>;
   requestPermissions(): Promise<boolean>;
+  requestPermissionsWithOptions(forceLaunch: boolean): Promise<boolean>;
   getDevices(): Promise<HomeDevice[]>;
   executeTraitCommand(
     deviceId: string,

@@ -37,6 +37,14 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
   }
 
   override fun requestPermissions(promise: Promise) {
+    requestPermissions(false, promise)
+  }
+
+  override fun requestPermissionsWithOptions(forceLaunch: Boolean, promise: Promise) {
+    requestPermissions(forceLaunch, promise)
+  }
+
+  private fun requestPermissions(forceLaunch: Boolean, promise: Promise) {
     val client = homeClient ?: return promise.reject("NOT_INIT", "Call initialize() first")
     val activity = reactApplicationContext.currentActivity as? ComponentActivity
       ?: return promise.reject("NO_ACTIVITY", "Current activity is not a ComponentActivity")
@@ -52,15 +60,19 @@ class GoogleHomeDeviceApiModule(reactContext: ReactApplicationContext) :
     scope.launch {
       try {
         // Check if permissions are already granted before launching UI
-        val currentState = client.hasPermissions().first()
-        if (currentState == PermissionsState.GRANTED) {
+        if (!forceLaunch && client.hasPermissions().first() == PermissionsState.GRANTED) {
           promise.resolve(true)
           return@launch
         }
 
         // Launch the Google Home permissions consent sheet on the UI thread
         withContext(Dispatchers.Main) {
-          val result = client.requestPermissions(forcePermissionFlow = ForcePermissionFlow.DO_NOT_FORCE_LAUNCH)
+          val permissionFlow = if (forceLaunch) {
+            ForcePermissionFlow.FORCE_LAUNCH
+          } else {
+            ForcePermissionFlow.DO_NOT_FORCE_LAUNCH
+          }
+          val result = client.requestPermissions(forcePermissionFlow = permissionFlow)
           promise.resolve(result.status == PermissionsResultStatus.SUCCESS)
         }
 

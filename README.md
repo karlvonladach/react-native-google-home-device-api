@@ -77,7 +77,8 @@ listing, connectivity-aware controls, and refreshing device state.
 | Method | Returns | Description |
 | :--- | :--- | :--- |
 | `initialize()` | `Promise<void>` | Initializes the native `HomeClient` instance. |
-| `requestPermissions()` | `Promise<boolean>` | Launches the Google Home structure & device permissions consent sheet. Resolves `true` if granted. |
+| `requestPermissions()` | `Promise<boolean>` | Requests access if not already granted. Resolves `true` if granted. |
+| `requestPermissionsWithOptions(forceLaunch)` | `Promise<boolean>` | Requests access; pass `true` to reopen the consent screen even if access is already granted, allowing the user to select another home. Pass `false` for the same behavior as `requestPermissions()`. |
 | `getDevices()` | `Promise<HomeDevice[]>` | Lists all accessible devices across the user's Google Home structures. |
 | `deviceHasTrait(device, traitId)` | `boolean` | Checks whether a listed device reports a trait identifier. |
 | `getDevice(deviceId, selector?)` | device wrapper | Creates a wrapper for commands, attribute reads/writes, and event subscriptions. |
